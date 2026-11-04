@@ -121,18 +121,40 @@ def tools_to_api(data) -> list:
 FROM_RE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*(?P<image>\S+)(?:\s+AS\s+\S+)?\s*$", re.IGNORECASE)
 
 
-def split_from(text: str):
-    """Split a Dockerfile into (image from its FROM line or None, text without that line).
+HEREDOC_RE = re.compile(r"<<-?\s*([\"']?)([A-Za-z_][A-Za-z0-9_]*)\1")
 
-    Domino's Dockerfile Instructions field must not contain FROM, so the line is removed
-    and its image can serve as the base image.
+
+def split_from(text: str):
+    """Split a Dockerfile into (image from its FROM instruction or None, text without it).
+
+    Domino's Dockerfile Instructions field must not contain FROM, so the instruction is
+    removed and its image can serve as the base image. Only a line that starts an
+    instruction counts: lines inside a backslash continuation or a heredoc body (e.g. a
+    ``from x import y`` in a multi-line RUN, or ``FROM table`` in a SQL heredoc) are kept.
     """
     image, kept = None, []
+    continued = False       # inside a backslash-continued instruction
+    heredocs = []           # pending heredoc delimiters (body lines follow)
     for line in text.splitlines():
-        if re.match(r"^\s*FROM(\s|$)", line, re.IGNORECASE):
+        stripped = line.strip()
+        if heredocs:                                   # heredoc body
+            kept.append(line)
+            if stripped == heredocs[0]:
+                heredocs.pop(0)
+            continue
+        if continued:
+            kept.append(line)
+            if stripped and not stripped.startswith("#"):   # comments don't end a continuation
+                continued = line.rstrip().endswith("\\")
+            continue
+        if not stripped or stripped.startswith("#"):
+            kept.append(line)
+            continue
+        keyword = stripped.split(None, 1)[0].upper()
+        if keyword == "FROM":
             match = FROM_RE.match(line)
             if not match:
-                raise ValueError(f"cannot parse FROM line: {line.strip()!r}")
+                raise ValueError(f"cannot parse FROM line: {stripped!r}")
             if image is not None:
                 raise ValueError("multi-stage Dockerfiles (more than one FROM) are not supported")
             image = match.group("image")
@@ -143,6 +165,10 @@ def split_from(text: str):
                                  "use a literal image or --base-image")
             continue
         kept.append(line)
+        if keyword in ("RUN", "COPY", "ADD"):
+            heredocs = [m.group(2) for m in HEREDOC_RE.finditer(line)]
+        if not heredocs:
+            continued = line.rstrip().endswith("\\")
     return image, "\n".join(kept) + ("\n" if kept else "")
 
 
@@ -523,11 +549,16 @@ class CreateEnvironment(DominoCLI):
             return (latest.get("status") or "").lower()
         # Another revision was submitted since: the Public API only reports the latest, so
         # read this one from the Environments web UI route (non-public; may change).
-        page = client.get(f"/environments/{env_id}/json/paged/0/50").json()
-        for rev in page.get("paginatedResults", {}).get("listing", []):
-            if rev.get("id") == revision_id:
-                return str(rev.get("buildStatus") or "").lower()
-        return ""
+        page_no = 0
+        while True:
+            page = client.get(f"/environments/{env_id}/json/paged/{page_no}/50").json()
+            for rev in page.get("paginatedResults", {}).get("listing", []):
+                if rev.get("id") == revision_id:
+                    return str(rev.get("buildStatus") or "").lower()
+            details = page.get("paginatedResults", {}).get("details", {})
+            page_no += 1
+            if page_no >= int(details.get("totalPages", 1) or 1):
+                return ""
 
     def _wait(self, client: DominoClient, env_id: str, revision_id: str, timeout: int) -> int:
         deadline = time.time() + timeout

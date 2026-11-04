@@ -54,6 +54,11 @@ python create_hwtier.py --hwtier-id example-medium-k8s --file changes.json   # p
 python update_config_records.py --file records.json [--namespace common] [--dry-run]
 ```
 
+## Tests
+```bash
+python -m unittest discover tests   # offline unit tests (Dockerfile FROM parsing, revision lookup)
+```
+
 ## Notes
 - Environments: the API does not carry settings over to a new revision (an update that sends
   only a Dockerfile drops the scripts, variables, workspace tools and summary). Updates therefore
