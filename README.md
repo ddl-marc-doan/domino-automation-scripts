@@ -13,7 +13,7 @@ Not yet implemented: feature flags (no API route in the 6.3.1 specs) and Keycloa
 
 ## Install
 ```bash
-pip install .        # or: pip install -e .   (dependencies: requests, PyYAML)
+pip install .        # or: pip install -e .   (dependencies: requests, PyYAML, dockerfile)
 ```
 
 ## Common flags
@@ -77,7 +77,9 @@ python -m unittest discover tests   # offline unit tests (Dockerfile FROM parsin
   source environment imports as `global` unless you pass `--visibility private`.
 - **Base image precedence:** `--base-image` flag, then `environment.json`'s `baseImage` (import), then the
   Dockerfile's `FROM` line (on update, a `FROM` line also beats the previous revision's image). The `FROM`
-  line is removed before sending, as Domino's Dockerfile Instructions can't contain one. Multi-stage
+  line is removed before sending, as Domino's Dockerfile Instructions can't contain one. Parsing uses the
+  official Docker parser (`dockerfile` package: compiled wheels for Linux x86_64, macOS and Windows x64; no
+  Linux ARM wheel, where it would need a Go toolchain to build). Multi-stage
   Dockerfiles, `FROM scratch` and variable images (`FROM ${BASE}`) are rejected. If a lower-precedence
   `FROM` disagrees, a note is printed.
 - `--pluggable-workspace-tools` takes the UI's YAML format; it is converted to the API's

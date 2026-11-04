@@ -42,6 +42,7 @@ import re
 import sys
 import time
 
+import dockerfile
 import yaml
 
 from domino_common import DominoCLI, DominoClient
@@ -118,58 +119,37 @@ def tools_to_api(data) -> list:
     return tools
 
 
-FROM_RE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*(?P<image>\S+)(?:\s+AS\s+\S+)?\s*$", re.IGNORECASE)
-
-
-HEREDOC_RE = re.compile(r"<<-?\s*([\"']?)([A-Za-z_][A-Za-z0-9_]*)\1")
-
-
 def split_from(text: str):
     """Split a Dockerfile into (image from its FROM instruction or None, text without it).
 
     Domino's Dockerfile Instructions field must not contain FROM, so the instruction is
-    removed and its image can serve as the base image. Only a line that starts an
-    instruction counts: lines inside a backslash continuation or a heredoc body (e.g. a
-    ``from x import y`` in a multi-line RUN, or ``FROM table`` in a SQL heredoc) are kept.
+    removed and its image can serve as the base image. Parsing is done by the official
+    Docker (BuildKit) parser via the ``dockerfile`` package, so continuations, comments,
+    heredocs and ``FROM`` options are handled exactly as Docker would.
     """
-    image, kept = None, []
-    continued = False       # inside a backslash-continued instruction
-    heredocs = []           # pending heredoc delimiters (body lines follow)
-    for line in text.splitlines():
-        stripped = line.strip()
-        if heredocs:                                   # heredoc body
-            kept.append(line)
-            if stripped == heredocs[0]:
-                heredocs.pop(0)
-            continue
-        if continued:
-            kept.append(line)
-            if stripped and not stripped.startswith("#"):   # comments don't end a continuation
-                continued = line.rstrip().endswith("\\")
-            continue
-        if not stripped or stripped.startswith("#"):
-            kept.append(line)
-            continue
-        keyword = stripped.split(None, 1)[0].upper()
-        if keyword == "FROM":
-            match = FROM_RE.match(line)
-            if not match:
-                raise ValueError(f"cannot parse FROM line: {stripped!r}")
-            if image is not None:
-                raise ValueError("multi-stage Dockerfiles (more than one FROM) are not supported")
-            image = match.group("image")
-            if image.lower() == "scratch":
-                raise ValueError("FROM scratch is not supported: Domino needs a base image")
-            if "$" in image:
-                raise ValueError(f"FROM image '{image}' uses a variable, which cannot be resolved; "
-                                 "use a literal image or --base-image")
-            continue
-        kept.append(line)
-        if keyword in ("RUN", "COPY", "ADD"):
-            heredocs = [m.group(2) for m in HEREDOC_RE.finditer(line)]
-        if not heredocs:
-            continued = line.rstrip().endswith("\\")
-    return image, "\n".join(kept) + ("\n" if kept else "")
+    try:
+        commands = dockerfile.parse_string(text)
+    except dockerfile.GoParseError as exc:
+        if "no instructions" in str(exc):          # empty or comment-only Dockerfile
+            return None, text
+        raise ValueError(f"cannot parse Dockerfile: {exc}")
+    froms = [c for c in commands if c.cmd.lower() == "from"]
+    if not froms:
+        return None, text
+    if len(froms) > 1:
+        raise ValueError("multi-stage Dockerfiles (more than one FROM) are not supported")
+    command = froms[0]
+    if not command.value:
+        raise ValueError("FROM has no image")
+    image = command.value[0]
+    if image.lower() == "scratch":
+        raise ValueError("FROM scratch is not supported: Domino needs a base image")
+    if "$" in image:
+        raise ValueError(f"FROM image '{image}' uses a variable, which cannot be resolved; "
+                         "use a literal image or --base-image")
+    lines = text.splitlines()
+    rest = lines[:command.start_line - 1] + lines[command.end_line:]   # lines are 1-based, inclusive
+    return image, "\n".join(rest) + ("\n" if rest else "")
 
 
 def parse_tags(text: str) -> list:

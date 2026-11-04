@@ -45,9 +45,39 @@ class SplitFromTests(unittest.TestCase):
             self.assertEqual(image, "img", opener)
             self.assertIn("FROM t", rest)
 
+    def test_heredoc_opened_on_continuation_line(self):
+        body = "RUN cat > q.sql \\\n<<'SQL'\nSELECT 1\nFROM source_table\nSQL\n"
+        image, rest = split_from("FROM img\n" + body)           # real FROM is not "multi-stage"
+        self.assertEqual(image, "img")
+        self.assertIn("FROM source_table", rest)
+        image, rest = split_from(body + "RUN true\n")          # instructions only: nothing stripped
+        self.assertIsNone(image)
+        self.assertIn("FROM source_table", rest)
+
+    def test_heredoc_on_later_continuation_line_with_comment(self):
+        text = "FROM img\nRUN echo a \\\n# note\n  && cat <<EOT \\\n  > f\nFROM t\nEOT\n"
+        image, rest = split_from(text)
+        self.assertEqual(image, "img")
+        self.assertIn("FROM t", rest)
+
     def test_instruction_after_heredoc_still_parsed(self):
         image, _ = split_from("RUN <<EOT\nx\nEOT\nFROM late\n")
         self.assertEqual(image, "late")
+
+    def test_empty_and_comment_only(self):
+        self.assertEqual(split_from(""), (None, ""))
+        self.assertEqual(split_from("# just a comment\n"), (None, "# just a comment\n"))
+
+    def test_multiline_from_is_fully_removed(self):
+        image, rest = split_from("FROM --platform=linux/amd64 \\\n    img:1 AS b\nRUN true\n")
+        self.assertEqual((image, rest), ("img:1", "RUN true\n"))
+
+    def test_crlf_line_endings(self):
+        self.assertEqual(split_from("FROM img\r\nRUN a\r\n"), ("img", "RUN a\n"))
+
+    def test_no_from_but_heredoc_with_from_text(self):
+        text = "RUN <<EOT\nFROM t\nEOT\n"
+        self.assertEqual(split_from(text), (None, text))
 
     def test_errors(self):
         for text in ("FROM a\nFROM b\n", "FROM scratch\n", "FROM ${BASE}\n", "FROM\n"):

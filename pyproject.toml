@@ -11,6 +11,7 @@ requires-python = ">=3.9"
 dependencies = [
     "requests>=2.31",
     "PyYAML>=6.0",
+    "dockerfile>=3.3",   # official Docker parser (compiled wheels; no Linux ARM wheel)
 ]
 
 [tool.setuptools]
