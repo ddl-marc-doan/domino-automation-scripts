@@ -11,6 +11,11 @@ Python scripts (using `requests` only) for configuring a Domino 6.3+ deployment.
 
 Not yet implemented: feature flags (no API route in the 6.3.1 specs) and Keycloak configuration.
 
+## Install
+```bash
+pip install .        # or: pip install -e .   (dependencies: requests, PyYAML)
+```
+
 ## Common flags
 `-k/--api-key` and `-h/--host` are read from `DOMINO_USER_API_KEY` and `DOMINO_API_HOST`
 when those are set; otherwise the flags are required. (`-h` is the host, so use `--help`

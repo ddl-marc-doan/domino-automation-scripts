@@ -36,6 +36,21 @@ class DominoAPIError(RuntimeError):
         )
 
 
+class _Session(requests.Session):
+    """Session that also strips X-Domino-Api-Key on cross-origin redirects.
+
+    ``requests`` drops the Authorization header when a redirect changes host, but it
+    forwards custom headers, which would leak the API key to the redirect target.
+    """
+
+    def rebuild_auth(self, prepared_request, response):
+        super().rebuild_auth(prepared_request, response)
+        if "X-Domino-Api-Key" in prepared_request.headers and self.should_strip_auth(
+            response.request.url, prepared_request.url
+        ):
+            del prepared_request.headers["X-Domino-Api-Key"]
+
+
 class DominoClient:
     """Authenticated session against the Domino platform API."""
 
@@ -45,7 +60,7 @@ class DominoClient:
             host = "https://" + host
         self.host = host
         self.timeout = timeout
-        self.session = requests.Session()
+        self.session = _Session()
         self.auth_scheme = self._authenticate(api_key)
 
     # -- authentication -------------------------------------------------------

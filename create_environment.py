@@ -476,15 +476,25 @@ class CreateEnvironment(DominoCLI):
             return 0
         return self._wait(client, env_id, revision_id, args.wait_timeout)
 
+    def _revision_status(self, client: DominoClient, env_id: str, revision_id: str) -> str:
+        """Build status of one specific revision ('' if unknown)."""
+        env = client.get(f"/api/environments/v1/environments/{env_id}").json()["environment"]
+        latest = env.get("latestRevision") or {}
+        if not revision_id or latest.get("id") == revision_id:
+            return (latest.get("status") or "").lower()
+        # Another revision was submitted since: the Public API only reports the latest, so
+        # read this one from the Environments web UI route (non-public; may change).
+        page = client.get(f"/environments/{env_id}/json/paged/0/50").json()
+        for rev in page.get("paginatedResults", {}).get("listing", []):
+            if rev.get("id") == revision_id:
+                return str(rev.get("buildStatus") or "").lower()
+        return ""
+
     def _wait(self, client: DominoClient, env_id: str, revision_id: str, timeout: int) -> int:
         deadline = time.time() + timeout
         last = None
         while time.time() < deadline:
-            env = client.get(f"/api/environments/v1/environments/{env_id}").json()["environment"]
-            rev = env.get("latestRevision") or {}
-            if revision_id and rev.get("id") not in (None, revision_id):
-                rev = {}
-            status = (rev.get("status") or "").lower()
+            status = self._revision_status(client, env_id, revision_id)
             if status != last:
                 print(f"  build status: {status or 'pending'}")
                 last = status

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "domino-automation-scripts"
+version = "0.1.0"
+description = "Scripts for configuring a Domino Data Lab platform (environments, hardware tiers, configuration records)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31",
+    "PyYAML>=6.0",
+]
+
+[tool.setuptools]
+# Flat layout of standalone scripts: list the modules explicitly.
+py-modules = [
+    "domino_common",
+    "create_environment",
+    "create_hwtier",
+    "update_config_records",
+]

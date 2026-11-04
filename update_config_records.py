@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from domino_common import DominoCLI, DominoClient
 
@@ -57,7 +58,7 @@ class UpdateConfigRecords(DominoCLI):
     def run(self, client: DominoClient, args: argparse.Namespace) -> int:
         existing = client.get(PATH).json()
         index = {(r["setting"]["namespace"], r["setting"]["key"]): r for r in existing}
-        counts = {"created": 0, "updated": 0, "unchanged": 0}
+        counts = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
 
         for key, value in args.records.items():
             record = index.get((args.namespace, key))
@@ -69,6 +70,7 @@ class UpdateConfigRecords(DominoCLI):
                     print(f"  skipped  {key}: exists in several namespaces "
                           f"({', '.join(sorted(r['setting']['namespace'] for r in matches))}); "
                           "re-run with --namespace")
+                    counts["skipped"] += 1
                     continue
             if record is None:
                 action = "created"
@@ -90,6 +92,9 @@ class UpdateConfigRecords(DominoCLI):
             print("\nNote: Domino services read configuration records at startup. Restart every "
                   "nucleus-* deployment and each data-plane-agent (local and remote) for these "
                   "changes to take effect (Configuration Records page > restart services, or kubectl).")
+        if counts["skipped"]:
+            print(f"error: {counts['skipped']} record(s) were skipped and not applied", file=sys.stderr)
+            return 1
         return 0
 
 
