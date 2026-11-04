@@ -1,0 +1,9 @@
+{
+  "name": "example-environment",
+  "description": "Example environment import: Standard Environment plus graphviz and tabulate",
+  "visibility": "private",
+  "baseImage": "quay.io/domino/domino-standard-environment:release-6.3.9fdec169",
+  "supportedClusters": [],
+  "useVpn": false,
+  "tags": ["team=ml", "tier=gold"]
+}

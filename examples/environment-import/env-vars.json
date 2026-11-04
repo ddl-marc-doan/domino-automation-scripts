@@ -1,0 +1,4 @@
+{
+  "ACME_MODE": "prod",
+  "ACME_LOG_LEVEL": "info"
+}
