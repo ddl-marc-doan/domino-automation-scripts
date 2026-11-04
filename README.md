@@ -27,7 +27,7 @@ once with the deprecated `X-Domino-Api-Key` header and prints a note to stderr.
 
 ## Usage
 ```bash
-# Environment (Dockerfile instructions only, no FROM line)
+# Environment (Dockerfile instructions; an optional single FROM line sets the base image)
 python create_environment.py --name my-env --base-image IMAGE --dockerfile Dockerfile --wait
 python create_environment.py -e ENV_ID --dockerfile Dockerfile --wait   # new revision (inherits previous settings)
 
@@ -67,9 +67,14 @@ python update_config_records.py --file records.json [--namespace common] [--dry-
   optionally `env-vars.json`, `pluggable-workspace-tools.yaml`, `pre-setup.sh`, `post-setup.sh`,
   `pre-run.sh`, `post-run.sh`, `environment.json`. With `environment.json`, its base image,
   description, visibility, supported clusters, VPN setting and tags are used; its id, name and
-  revision are ignored, and `isRestricted` is never set. Without it, pass `--base-image`.
+  revision are ignored, and `isRestricted` is never set. Without it, pass `--base-image` or put a `FROM` line in the Dockerfile.
   Precedence: explicit flag > file in the directory > `environment.json` > default. A global
   source environment imports as `global` unless you pass `--visibility private`.
+- **Base image precedence:** `--base-image` flag, then `environment.json`'s `baseImage` (import), then the
+  Dockerfile's `FROM` line (on update, a `FROM` line also beats the previous revision's image). The `FROM`
+  line is removed before sending, as Domino's Dockerfile Instructions can't contain one. Multi-stage
+  Dockerfiles, `FROM scratch` and variable images (`FROM ${BASE}`) are rejected. If a lower-precedence
+  `FROM` disagrees, a note is printed.
 - `--pluggable-workspace-tools` takes the UI's YAML format; it is converted to the API's
   `workspaceTools` (`start` -> `startScripts`, `httpProxy` -> `proxyConfig`). `--tags` pairs are
   stored as `key=value` strings. `--env-vars` accepts JSON or YAML; `DOMINO_*` names are rejected.

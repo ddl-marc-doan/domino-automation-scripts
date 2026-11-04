@@ -13,7 +13,7 @@ Dump:    create_environment.py -e ENVIRONMENT_ID --dump [--output-dir DIR]
 
 Import:  create_environment.py --import NEW_NAME --directory DIR
          Creates a new environment from a directory (e.g. one written by --dump) holding a
-         Dockerfile (required) and optionally env-vars.json, pluggable-workspace-tools.yaml,
+         Dockerfile (required; its FROM line, if any, is the last-resort base image) and optionally env-vars.json, pluggable-workspace-tools.yaml,
          pre-setup.sh, post-setup.sh, pre-run.sh, post-run.sh and environment.json. When
          environment.json is present its base image, description, visibility, supported
          clusters, VPN setting and tags are used for the new environment (its id, name and
@@ -27,8 +27,10 @@ Optional revision settings (all files are read from disk):
   --pre-setup-script / --post-setup-script / --pre-run-script / --post-run-script FILE
   --supported-clusters dask,ray,...   --skip-cache   --tags key=value,key2=value2
 
-The Dockerfile holds Domino "Dockerfile Instructions" only: do not include ``FROM``
-(Domino adds it from the base image). Targets Domino 6.3+: the beta routes are used on
+The Dockerfile holds Domino "Dockerfile Instructions". A single ``FROM image`` line is
+accepted: it is removed (Domino adds FROM itself) and its image used as the base image
+unless --base-image or an imported environment.json's baseImage is given (in that order of
+precedence). Multi-stage, ``FROM scratch`` and variable images are rejected. Targets Domino 6.3+: the beta routes are used on
 6.3.x and the v2 routes on 6.4 and later.
 """
 from __future__ import annotations
@@ -116,6 +118,34 @@ def tools_to_api(data) -> list:
     return tools
 
 
+FROM_RE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*(?P<image>\S+)(?:\s+AS\s+\S+)?\s*$", re.IGNORECASE)
+
+
+def split_from(text: str):
+    """Split a Dockerfile into (image from its FROM line or None, text without that line).
+
+    Domino's Dockerfile Instructions field must not contain FROM, so the line is removed
+    and its image can serve as the base image.
+    """
+    image, kept = None, []
+    for line in text.splitlines():
+        if re.match(r"^\s*FROM(\s|$)", line, re.IGNORECASE):
+            match = FROM_RE.match(line)
+            if not match:
+                raise ValueError(f"cannot parse FROM line: {line.strip()!r}")
+            if image is not None:
+                raise ValueError("multi-stage Dockerfiles (more than one FROM) are not supported")
+            image = match.group("image")
+            if image.lower() == "scratch":
+                raise ValueError("FROM scratch is not supported: Domino needs a base image")
+            if "$" in image:
+                raise ValueError(f"FROM image '{image}' uses a variable, which cannot be resolved; "
+                                 "use a literal image or --base-image")
+            continue
+        kept.append(line)
+    return image, "\n".join(kept) + ("\n" if kept else "")
+
+
 def parse_tags(text: str) -> list:
     """'a=1,b=2' -> ['a=1', 'b=2'] (the API stores tags as plain strings)."""
     tags = []
@@ -145,11 +175,12 @@ class CreateEnvironment(DominoCLI):
                             help="Existing environment to update (adds a new revision). "
                                  "Omit to create a new environment.")
         parser.add_argument("--dockerfile",
-                            help="Path to a file of Dockerfile instructions (no FROM line); "
+                            help="Path to a file of Dockerfile instructions (an optional FROM line sets the base image); "
                                  "required unless --dump")
         parser.add_argument("--name", help="Environment name (required when creating)")
         parser.add_argument("--base-image",
-                            help="Base image URI (required when creating; on update defaults to the previous revision's)")
+                            help="Base image URI. Overrides environment.json and the Dockerfile's FROM line; one of the "
+                                 "three is required when creating (on update, defaults to the previous revision's)")
         parser.add_argument("--description", default=None, help="Environment description (create only)")
         parser.add_argument("--visibility", choices=["private", "global"], default=None,
                             help="Environment visibility when creating (default: private)")
@@ -212,21 +243,29 @@ class CreateEnvironment(DominoCLI):
             args.visibility = "private"
         if not args.dockerfile:
             parser.error("--dockerfile is required unless --dump or --import is given")
+        try:
+            with open(args.dockerfile, encoding="utf-8") as fh:
+                text = fh.read()
+            dockerfile_from, args.dockerfile_text = split_from(text)
+        except OSError as exc:
+            parser.error(f"cannot read --dockerfile: {exc}")
+        except ValueError as exc:
+            parser.error(f"{args.dockerfile}: {exc}")
+        # Base image precedence: --base-image, then environment.json (import), then the
+        # Dockerfile's FROM line (already applied above by _resolve_import when present).
+        if args.base_image is None:
+            args.base_image = dockerfile_from
+        elif dockerfile_from and dockerfile_from != args.base_image:
+            print(f"note: using base image '{args.base_image}'; the Dockerfile's FROM "
+                  f"'{dockerfile_from}' is ignored", file=sys.stderr)
         if not args.environment_id:
             if not args.name:
                 parser.error("--name is required when creating an environment (no --environment-id)")
             if not args.base_image:
-                parser.error("--base-image is required when creating an environment")
+                parser.error("a base image is required when creating: use --base-image, "
+                             "environment.json's baseImage, or a FROM line in the Dockerfile")
         elif args.no_inherit and not args.base_image:
-            parser.error("--base-image is required with --no-inherit")
-        try:
-            with open(args.dockerfile, encoding="utf-8") as fh:
-                args.dockerfile_text = fh.read()
-        except OSError as exc:
-            parser.error(f"cannot read --dockerfile: {exc}")
-        for line in args.dockerfile_text.splitlines():
-            if re.match(r"\s*FROM\s", line, re.IGNORECASE):
-                parser.error("the Dockerfile must not contain FROM; use --base-image instead")
+            parser.error("a base image is required with --no-inherit (--base-image or a FROM line)")
 
         # Optional revision settings; only fields the user supplied are sent.
         args.extra = {}
