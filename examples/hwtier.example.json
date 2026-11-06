@@ -1,0 +1,38 @@
+{
+  "id": "example-medium-k8s",
+  "name": "Example Medium",
+  "nodePool": "default",
+  "centsPerMinute": 0,
+  "maxSimultaneousExecutions": 0,
+  "resources": {
+    "cores": 2,
+    "coresLimit": 2,
+    "memory": { "value": 8, "units": "GiB" },
+    "memoryLimit": { "value": 8, "units": "GiB" },
+    "allowSharedMemoryToExceedDefault": false
+  },
+  "flags": {
+    "isDefault": false,
+    "isVisible": true,
+    "isGlobal": true,
+    "isDataAnalystTier": false
+  },
+  "gpuConfiguration": { "numberOfGpus": 0, "gpuKey": "nvidia.com/gpu" },
+  "computeClusterRestrictions": {
+    "restrictToSpark": false,
+    "restrictToRay": false,
+    "restrictToDask": false,
+    "restrictToMpi": false,
+    "restrictToSlurm": false
+  },
+  "overProvisioning": {
+    "instances": 0,
+    "schedulingEnabled": false,
+    "daysOfWeek": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"],
+    "timezone": "UTC",
+    "fromTime": "08:00",
+    "toTime": "19:00"
+  },
+  "podCustomization": {},
+  "tags": []
+}
